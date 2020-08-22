@@ -22,11 +22,11 @@ import "./TokenPool.sol";
  *      divided by the global 'sum(lockTime * amount)'.
  *
  *      If a user revokes their tokens from the pool too early, there is a penalty that gets applied to the
- *      received funds. The calculation for penalty is: (% of time left / 2) * expectedRewardAmount
- *      A 1000 coil deposit for 60 days with 1000 coil as reward getting removed at 30 days is a 250 coil penalty
- *      leaving the user with 750 coil only and no rewards. The penalty amount immediately gets deposited towards
- *      the unlocked pool. This encourages dedicated supporters and follows very loosely to a traditional
- *      certificate of deposit
+ *      received funds. The calculation for penalty is: (% of time left / 2) * deposited UNI-V2 LP.
+ *      A 10 UNI-V2 LP deposit for 60 days getting removed at 30 days is a 2.5 UNI-V2 LP penalty leaving the
+ *      user with 7.5 UNI-V2 LP only and no rewards, losing 25% of their initial liquidity. The penalty amount
+ *      immediately gets deposited towards a designated penatly address. This encourages dedicated stakers and follows
+ *      very loosely to a traditional certificate of deposit
  *
  */
 contract TokenGeyser is IStaking, Ownable {
@@ -38,6 +38,9 @@ contract TokenGeyser is IStaking, Ownable {
     event TokensLocked(uint256 amount, uint256 durationSec, uint256 total);
     // amount: Unlocked tokens, total: Total locked tokens
     event TokensUnlocked(uint256 amount, uint256 total);
+
+    event LogPenaltyAddressUpdated(address penaltyAddress_);
+
 
     TokenPool private _stakingPool;
     TokenPool private _unlockedPool;
@@ -123,6 +126,18 @@ contract TokenGeyser is IStaking, Ownable {
         bonusPeriodSec = bonusPeriodSec_;
         _maxUnlockSchedules = maxUnlockSchedules;
         _initialSharesPerToken = initialSharesPerToken;
+    }
+
+    /**
+     * @param penaltyAddress_ The penalty address to use for penalties.
+     */
+
+    function setPenaltyAddress(address penaltyAddress_)
+        external
+        onlyOwner
+    {
+        penaltyAddress = penaltyAddress_;
+        emit LogPenaltyAddressUpdated(penaltyAddress_);
     }
 
     /**
