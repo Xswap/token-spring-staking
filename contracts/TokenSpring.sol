@@ -41,7 +41,6 @@ contract TokenSpring is IStaking, Ownable {
 
     event LogPenaltyAddressUpdated(address penaltyAddress_);
 
-
     TokenPool private _stakingPool;
     TokenPool private _unlockedPool;
     TokenPool private _lockedPool;
@@ -52,6 +51,7 @@ contract TokenSpring is IStaking, Ownable {
     uint256 public constant BONUS_DECIMALS = 2;
     uint256 public startBonus = 0;
     uint256 public bonusPeriodSec = 0;
+    uint256 public maxLockTimeSeconds = 90 days;
 
     //
     // Global accounting state
@@ -180,26 +180,32 @@ contract TokenSpring is IStaking, Ownable {
      * @param staker User address who deposits tokens to stake.
      * @param beneficiary User address who gains credit for this stake operation.
      * @param amount Number of deposit tokens to stake.
-     * @param time Unix timestamp in seconds for the expiration time.
+     * @param time Seconds added to current time for the expiration time.
      */
     function _stakeFor(address staker, address beneficiary, uint256 amount, uint256 time) private {
         require(amount > 0, 'TokenSpring: stake amount is zero');
         require(beneficiary != address(0), 'TokenSpring: beneficiary is zero address');
         require(totalStakingShares == 0 || totalStaked() > 0,
                 'TokenSpring: Invalid state. Staking shares exist, but no staking tokens do');
-        require(time > now, 'TokenSpring: expiration time is too soon');
+        require(time > 0, 'TokenSpring: expiration time is too soon');
+
+        uint256 expiryTime = now.add(time);
+
+        // restrict the max lock time to prevent attackers from setting a ceiling limit
+        if(time > maxLockTimeSeconds){
+          expiryTime = now.add(maxLockTimeSeconds);
+        }
 
         uint256 mintedStakingShares = (totalStakingShares > 0)
             ? totalStakingShares.mul(amount).div(totalStaked())
             : amount.mul(_initialSharesPerToken);
         require(mintedStakingShares > 0, 'TokenSpring: Stake amount is too small');
 
-
         // 1. User Accounting
         UserTotals storage totals = _userTotals[beneficiary];
         totals.stakingShares = totals.stakingShares.add(mintedStakingShares);
 
-        Stake memory newStake = Stake(mintedStakingShares, now, time);
+        Stake memory newStake = Stake(mintedStakingShares, now, expiryTime);
         _userStakes[beneficiary].push(newStake);
 
         // 2. Global Accounting
@@ -210,9 +216,9 @@ contract TokenSpring is IStaking, Ownable {
             'TokenSpring: transfer into staking pool failed');
 
         // set global and user weights after CD is deposited
-        updateAccounting(time, amount);
+        updateAccounting(expiryTime, mintedStakingShares);
 
-        emit Staked(beneficiary, amount, totalStakedFor(beneficiary), time, "");
+        emit Staked(beneficiary, amount, totalStakedFor(beneficiary), expiryTime, "");
     }
 
     /**
@@ -259,8 +265,12 @@ contract TokenSpring is IStaking, Ownable {
         uint256 sharesLeftToBurn = stakingSharesToBurn;
         uint256 rewardAmount = 0;
         uint256 penaltyAmount = 0;
+        uint256 totalAmount = 0;
         while (sharesLeftToBurn > 0) {
             Stake storage lastStake = accountStakes[accountStakes.length - 1];
+            // normalized amount from this CD
+            uint256 newAmount = lastStake.stakingShares.mul(totalStaked()).div(totalStakingShares);
+            totalAmount = totalAmount.add(newAmount);
             uint256 stakeTimeSec = now.sub(lastStake.timestampSec);
             uint256 stakeTimeSecCalculated = lastStake.lockTimestampSec.sub(lastStake.timestampSec);
             uint256 newStakingShareSecondsToBurn = 0;
@@ -268,28 +278,35 @@ contract TokenSpring is IStaking, Ownable {
             // MUST fully redeem a past stake, CD gets destroyed
             newStakingShareSecondsToBurn = lastStake.stakingShares.mul(stakeTimeSecCalculated);
             stakingShareSecondsToBurn = stakingShareSecondsToBurn.add(newStakingShareSecondsToBurn);
-            sharesLeftToBurn = sharesLeftToBurn.sub(lastStake.stakingShares);
-            accountStakes.length--;
+
+            if(lastStake.stakingShares > sharesLeftToBurn){
+              sharesLeftToBurn = 0;
+            } else {
+              sharesLeftToBurn = sharesLeftToBurn.sub(lastStake.stakingShares);
+            }
 
             // Need to be penalized
             if(lastStake.lockTimestampSec > now){
               // amountOfThisStake * (totalLock - actualLock)/totalLock) / 2
-              penaltyAmount = penaltyAmount.add(stakeTimeSecCalculated.sub(stakeTimeSec).div(stakeTimeSecCalculated).div(2).mul(lastStake.stakingShares))
+              penaltyAmount = penaltyAmount.add(stakeTimeSecCalculated.sub(stakeTimeSec).mul(newAmount).div(stakeTimeSecCalculated).div(2));
             } else {
-              // this contract was fulfilled, make sure to pay out the reward
+              // this contract was fulfilled, make sure to pay out the reward based on the calculated time
               rewardAmount = computeNewReward(rewardAmount, newStakingShareSecondsToBurn, stakeTimeSecCalculated);
             }
+
+            accountStakes.length--;
         }
+
         totals.stakingShareSeconds = totals.stakingShareSeconds.sub(stakingShareSecondsToBurn);
-        totals.stakingShares = totals.stakingShares.sub(stakingSharesToBurn);
+        totals.stakingShares = totals.stakingShares.sub(totalStakingShares.mul(totalAmount).div(totalStaked()));
 
         // 2. Global Accounting
         _totalStakingShareSeconds = _totalStakingShareSeconds.sub(stakingShareSecondsToBurn);
-        totalStakingShares = totalStakingShares.sub(stakingSharesToBurn);
+        totalStakingShares = totalStakingShares.sub(totalStakingShares.mul(totalAmount).div(totalStaked()));
 
         // what the staker should receive
-        uint256 amountMinusPenalty = amount.sub(penaltyAmount);
-        require(amount >= penaltyAmount, 'TokenSpring: penalty amount exceeds amount being redeemed');
+        uint256 amountMinusPenalty = totalAmount.sub(penaltyAmount);
+        require(totalAmount >= penaltyAmount, 'TokenSpring: penalty amount exceeds amount being redeemed');
 
         // just because we have penalties, does not mean we do not have rewards to pay out
         if(rewardAmount > 0) {
@@ -378,7 +395,7 @@ contract TokenSpring is IStaking, Ownable {
     }
 
     /**
-     * @dev A globally callable function to update the accounting state of the system.
+     * @dev An internally callable function to update the accounting state of the system with staking information.
      *      Global state and state for the caller are updated.
      * @return [0] balance of the locked pool
      * @return [1] balance of the unlocked pool
@@ -387,7 +404,7 @@ contract TokenSpring is IStaking, Ownable {
      * @return [4] Rewards caller has accumulated, optimistically assumes max time-bonus.
      * @return [5] block timestamp
      */
-    function updateAccounting(uint256 timeForContract, uint256 amountForContract) public returns (
+    function updateAccounting(uint256 timeForContract, uint256 amountForContract) internal returns (
         uint256, uint256, uint256, uint256, uint256, uint256) {
 
         unlockTokens();
@@ -408,6 +425,37 @@ contract TokenSpring is IStaking, Ownable {
         totals.stakingShareSeconds =
             totals.stakingShareSeconds
             .add(newUserStakingShareSeconds);
+
+        uint256 totalUserRewards = (_totalStakingShareSeconds > 0)
+            ? totalUnlocked().mul(totals.stakingShareSeconds).div(_totalStakingShareSeconds)
+            : 0;
+
+        return (
+            totalLocked(),
+            totalUnlocked(),
+            totals.stakingShareSeconds,
+            _totalStakingShareSeconds,
+            totalUserRewards,
+            now
+        );
+    }
+
+    /**
+     * @dev A globally callable function to get the accounting state of the system.
+     * @return [0] balance of the locked pool
+     * @return [1] balance of the unlocked pool
+     * @return [2] caller's staking share seconds
+     * @return [3] global staking share seconds
+     * @return [4] Rewards caller has accumulated, optimistically assumes max time-bonus.
+     * @return [5] block timestamp
+     */
+    function getAccounting() public returns (
+        uint256, uint256, uint256, uint256, uint256, uint256) {
+
+        unlockTokens();
+
+        // User Accounting
+        UserTotals storage totals = _userTotals[msg.sender];
 
         uint256 totalUserRewards = (_totalStakingShareSeconds > 0)
             ? totalUnlocked().mul(totals.stakingShareSeconds).div(_totalStakingShareSeconds)
