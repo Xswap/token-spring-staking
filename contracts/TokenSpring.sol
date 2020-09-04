@@ -232,6 +232,16 @@ contract TokenSpring is IStaking, Ownable {
     }
 
     /**
+     * @dev Unstakes a contract at specific index. User also receives their
+     * alotted number of distribution tokens.
+     * @param index index of staking contract.
+     * @param data Not used.
+     */
+    function unstakeAtIndex(uint256 index, bytes calldata data) external {
+        _unstakeAtIndex(index);
+    }
+
+    /**
      * @param amount Number of deposit tokens to unstake / withdraw.
      * @return The total number of distribution tokens that would be rewarded.
      */
@@ -296,6 +306,90 @@ contract TokenSpring is IStaking, Ownable {
 
             accountStakes.length--;
         }
+
+        totals.stakingShareSeconds = totals.stakingShareSeconds.sub(stakingShareSecondsToBurn);
+        totals.stakingShares = totals.stakingShares.sub(totalStakingShares.mul(totalAmount).div(totalStaked()));
+
+        // 2. Global Accounting
+        _totalStakingShareSeconds = _totalStakingShareSeconds.sub(stakingShareSecondsToBurn);
+        totalStakingShares = totalStakingShares.sub(totalStakingShares.mul(totalAmount).div(totalStaked()));
+
+        // what the staker should receive
+        uint256 amountMinusPenalty = totalAmount.sub(penaltyAmount);
+        require(totalAmount >= penaltyAmount, 'TokenSpring: penalty amount exceeds amount being redeemed');
+
+        // just because we have penalties, does not mean we do not have rewards to pay out
+        if(rewardAmount > 0) {
+          // this unstake has no penalty, pay out the rewards
+          require(_unlockedPool.transfer(msg.sender, rewardAmount),
+              'TokenSpring: transfer out of unlocked pool failed');
+        }
+
+        // pay out the contract deposit amount minus any penalty
+        require(_stakingPool.transfer(msg.sender, amountMinusPenalty),
+            'TokenSpring: transfer out of staking pool failed');
+
+        if(penaltyAmount > 0){
+          // need to send penalty amount to the pool
+          require(_stakingPool.transfer(penaltyAddress, penaltyAmount),
+            'TokenSpring: transfer into staking pool failed');
+        }
+
+        emit Unstaked(msg.sender, amountMinusPenalty, totalStakedFor(msg.sender), penaltyAmount, "");
+        emit TokensClaimed(msg.sender, rewardAmount);
+
+        require(totalStakingShares == 0 || totalStaked() > 0,
+                "TokenSpring: Error unstaking. Staking shares exist, but no staking tokens do");
+        return rewardAmount;
+    }
+
+
+    /**
+     * @dev Unstakes a certain index of previously deposited contract. User also receives their
+     * alotted number of distribution tokens.
+     * @param index Index of contract to withdraw.
+     * @return The total number of distribution tokens rewarded.
+     */
+    function _unstakeAtIndex(uint256 index) private returns (uint256) {
+        unlockTokens();
+
+        // checks
+        require(totalStakedFor(msg.sender) >= 0,
+            'TokenSpring: user has zero staked');
+
+        // 1. User Accounting
+        UserTotals storage totals = _userTotals[msg.sender];
+        Stake[] storage accountStakes = _userStakes[msg.sender];
+
+        require(accountStakes.length > index,
+            'TokenSpring: unstake index is not available');
+
+        Stake storage lastStake = accountStakes[index];
+
+        // Redeem from most recent stake and go backwards in time.
+        uint256 stakingShareSecondsToBurn = 0;
+        uint256 rewardAmount = 0;
+        uint256 penaltyAmount = 0;
+        // normalized amount from this CD
+        uint256 totalAmount = lastStake.stakingShares.mul(totalStaked()).div(totalStakingShares);
+        require(totalAmount > 0, 'TokenSpring: unstake index amount is zero');
+
+        uint256 stakeTimeSec = now.sub(lastStake.timestampSec);
+        uint256 stakeTimeSecCalculated = lastStake.lockTimestampSec.sub(lastStake.timestampSec);
+
+        // MUST fully redeem a past stake, CD gets destroyed
+        stakingShareSecondsToBurn = lastStake.stakingShares.mul(stakeTimeSecCalculated);
+
+        // Need to be penalized
+        if(lastStake.lockTimestampSec > now){
+          // amountOfThisStake * (totalLock - actualLock)/totalLock) / 2
+          penaltyAmount = penaltyAmount.add(stakeTimeSecCalculated.sub(stakeTimeSec).mul(totalAmount).div(stakeTimeSecCalculated).div(2));
+        } else {
+          // this contract was fulfilled, make sure to pay out the reward based on the calculated time
+          rewardAmount = computeNewReward(rewardAmount, stakingShareSecondsToBurn, stakeTimeSecCalculated);
+        }
+
+        delete accountStakes[index];
 
         totals.stakingShareSeconds = totals.stakingShareSeconds.sub(stakingShareSecondsToBurn);
         totals.stakingShares = totals.stakingShares.sub(totalStakingShares.mul(totalAmount).div(totalStaked()));
@@ -468,6 +562,32 @@ contract TokenSpring is IStaking, Ownable {
             _totalStakingShareSeconds,
             totalUserRewards,
             now
+        );
+    }
+
+    /**
+     * @dev A globally callable function to get the staking contracts of an address.
+     * @return [0] contracts of the address
+     * @return [1] block timestamp
+     */
+    function getContractAtIndex(address addr, uint256 index) public view returns (uint256, uint256, uint256) {
+        // User Accounting
+        Stake[] storage accountStakes = _userStakes[addr];
+        uint256 stakingShares = 0;
+        uint256 timestampSec = 0;
+        uint256 lockTimestampSec = 0;
+
+        if(accountStakes.length > index){
+          Stake storage indexStake = accountStakes[index];
+          stakingShares = indexStake.stakingShares;
+          timestampSec = indexStake.timestampSec;
+          lockTimestampSec = indexStake.lockTimestampSec;
+        }
+
+        return (
+            stakingShares,
+            timestampSec,
+            lockTimestampSec
         );
     }
 
