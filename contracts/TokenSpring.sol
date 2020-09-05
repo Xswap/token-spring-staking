@@ -234,7 +234,7 @@ contract TokenSpring is IStaking, Ownable {
     /**
      * @dev Unstakes a contract at specific index. User also receives their
      * alotted number of distribution tokens.
-     * @param index index of staking contract.
+     * @param index Index of staking contract.
      * @param data Not used.
      */
     function unstakeAtIndex(uint256 index, bytes calldata data) external {
@@ -247,6 +247,14 @@ contract TokenSpring is IStaking, Ownable {
      */
     function unstakeQuery(uint256 amount) public returns (uint256) {
         return _unstake(amount);
+    }
+
+    /**
+     * @param index Index of staking contract.
+     * @return The total number of distribution tokens that would be rewarded.
+     */
+    function unstakeAtIndexQuery(uint256 index) public returns (uint256) {
+        return _unstakeAtIndex(index);
     }
 
     /**
@@ -354,7 +362,7 @@ contract TokenSpring is IStaking, Ownable {
         unlockTokens();
 
         // checks
-        require(totalStakedFor(msg.sender) >= 0,
+        require(totalStakedFor(msg.sender) > 0,
             'TokenSpring: user has zero staked');
 
         // 1. User Accounting
@@ -389,7 +397,12 @@ contract TokenSpring is IStaking, Ownable {
           rewardAmount = computeNewReward(rewardAmount, stakingShareSecondsToBurn, stakeTimeSecCalculated);
         }
 
-        delete accountStakes[index];
+        // reset the array, remove the index we are unstaking
+        for (uint256 i = index; i < accountStakes.length-1; i++){
+            accountStakes[i] = accountStakes[i+1];
+        }
+
+        accountStakes.length--;
 
         totals.stakingShareSeconds = totals.stakingShareSeconds.sub(stakingShareSecondsToBurn);
         totals.stakingShares = totals.stakingShares.sub(totalStakingShares.mul(totalAmount).div(totalStaked()));
