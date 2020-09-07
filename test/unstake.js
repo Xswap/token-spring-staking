@@ -32,7 +32,7 @@ async function setupContractAndAccounts () {
   const startBonus = 33; // 33%
   const bonusPeriod = 5184000; // 60 days
   dist = await TokenSpring.new(ampl.address, ampl.address, 10, startBonus, bonusPeriod,
-    InitialSharesPerToken);
+    InitialSharesPerToken, {gas:6500000});
 
   await ampl.transfer(anotherAccount, $AMPL(50000));
   await ampl.approve(dist.address, $AMPL(50000), { from: anotherAccount });
@@ -438,5 +438,105 @@ describe('unstaking', function () {
       const b = await ampl.balanceOf.call(penaltyAccount);
       checkAmplAprox(b, 12.5);
     });
+  });
+
+  describe('when a user stakes two times and redeems one of the stake indexs too early', function () {
+    // 100 ampls locked for 1 year, user stakes 50 ampls for 2 months
+    // unstakes 50 ampls after 1 month
+    // should have a penalty of 0.25% of the original 50 ~12.5
+    const timeController = new TimeController();
+    const cdExpirySeconds = 60 * 24 * 3600;
+    beforeEach(async function () {
+      await dist.lockTokens($AMPL(100), ONE_YEAR);
+      await timeController.initialize();
+      const s = await dist.stake($AMPL(50), cdExpirySeconds, [], { from: anotherAccount });
+      await timeController.advanceTime(30 * 24 * 3600); // moves forward 1 month, unlocks 8.33 (2628000 seconds)
+      const v = await dist.stake($AMPL(50), cdExpirySeconds, [], { from: anotherAccount });
+      await timeController.advanceTime(30 * 24 * 3600); // moves forward 1 month, unlocks 8.33 (2628000 seconds)
+      await dist.getAccounting({ from: anotherAccount });
+      // we have 2 contracts now, index 0 that is available, index 1 that has 30 days left
+    });
+
+    it('should return the original amount plus rewards', async function () {
+      const contr00 = await dist.getContractAtIndex(anotherAccount, 0)
+      const contr11 = await dist.getContractAtIndex(anotherAccount, 1)
+
+      const r = await dist.unstakeAtIndex(0, [], { from: anotherAccount }); // unstakes 50
+      // penalty = 0
+      expectEvent(r, 'Unstaked', {
+        user: anotherAccount,
+        amount: $AMPL(50),
+        total: $AMPL(50), // still has a contract left
+        penaltyAmount: $AMPL(0)
+      });
+      // (.33 + (60/60 * .67)) * 16.66 / 2
+      expectEvent(r, 'TokensClaimed', {
+        user: anotherAccount,
+        amount: $AMPL(8.219178082)
+      });
+
+      const b = await ampl.balanceOf.call(penaltyAccount);
+      checkAmplAprox(b, 0);
+    });
+
+    it('should return the original amount minus penalties (no rewards given)', async function () {
+      const r = await dist.unstakeAtIndex(1, [], { from: anotherAccount }); // unstakes 50
+      // penalty = 50 * ((60 - 30)/60) / 2 = 12.5
+      expectEvent(r, 'Unstaked', {
+        user: anotherAccount,
+        amount: $AMPL(50 - 12.5),
+        total: $AMPL(50),
+        penaltyAmount: $AMPL(12.5)
+      });
+      expectEvent(r, 'TokensClaimed', {
+        user: anotherAccount,
+        amount: $AMPL(0)
+      });
+
+      const b = await ampl.balanceOf.call(penaltyAccount);
+      checkAmplAprox(b, 12.5);
+    });
+  });
+
+  describe('when a user stakes several contracts', function () {
+    // 100 ampls locked for 1 year, user stakes 50 ampls for 2 months
+    // unstakes 50 ampls after 1 month
+    // should have a penalty of 0.25% of the original 50 ~12.5
+    const timeController = new TimeController();
+    const cdExpirySeconds = 60 * 24 * 3600;
+    beforeEach(async function () {
+      await dist.lockTokens($AMPL(100), ONE_YEAR);
+      await timeController.initialize();
+      await dist.stake($AMPL(50), cdExpirySeconds, [], { from: anotherAccount });
+      await dist.stake($AMPL(55), cdExpirySeconds, [], { from: anotherAccount });
+      await dist.stake($AMPL(60), cdExpirySeconds, [], { from: anotherAccount });
+      await timeController.advanceTime(61 * 24 * 3600); // moves forward 1 month, unlocks 8.33 (2628000 seconds)
+      await dist.getAccounting({ from: anotherAccount });
+    });
+
+    it('should reset the contract indexs when unstaking', async function () {
+      const fifty_contract = await dist.unstakeAtIndex(0, [], { from: anotherAccount }); // unstakes 50
+      expectEvent(fifty_contract, 'Unstaked', {
+        user: anotherAccount,
+        amount: $AMPL(50),
+        total: $AMPL(115), // still 60 + 55 left
+        penaltyAmount: $AMPL(0)
+      });
+
+      const secondContract = await dist.getContractAtIndex(anotherAccount, 0);
+      expect(secondContract[0]).to.be.bignumber.equal('55000000000000000');
+
+      const fiftyfive_contract = await dist.unstakeAtIndex(0, [], { from: anotherAccount }); // unstakes 55
+      expectEvent(fiftyfive_contract, 'Unstaked', {
+        user: anotherAccount,
+        amount: $AMPL(55),
+        total: $AMPL(60), // still 60 left
+        penaltyAmount: $AMPL(0)
+      });
+
+      const lastContract = await dist.getContractAtIndex(anotherAccount, 0);
+      expect(lastContract[0]).to.be.bignumber.equal('60000000000000000');
+    });
+
   });
 });

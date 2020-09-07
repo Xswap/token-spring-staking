@@ -33,7 +33,7 @@ async function setupContractAndAccounts () {
   await ampl.setMonetaryPolicy(owner);
 
   dist = await TokenSpring.new(ampl.address, ampl.address, 10, START_BONUS, BONUS_PERIOD,
-    InitialSharesPerToken);
+    InitialSharesPerToken, {gas:6500000});
 }
 
 async function checkAvailableToUnlock (dist, v) {
@@ -57,14 +57,14 @@ describe('LockedPool', function () {
   describe('lockTokens', function () {
     describe('when not approved', function () {
       it('should fail', async function () {
-        const d = await TokenSpring.new(ampl.address, ampl.address, 5, START_BONUS, BONUS_PERIOD, InitialSharesPerToken);
+        const d = await TokenSpring.new(ampl.address, ampl.address, 5, START_BONUS, BONUS_PERIOD, InitialSharesPerToken, {gas:6500000});
         await expectRevert.unspecified(d.lockTokens($AMPL(10), ONE_YEAR));
       });
     });
 
     describe('when number of unlock schedules exceeds the maxUnlockSchedules', function () {
       it('should fail', async function () {
-        const d = await TokenSpring.new(ampl.address, ampl.address, 5, START_BONUS, BONUS_PERIOD, InitialSharesPerToken);
+        const d = await TokenSpring.new(ampl.address, ampl.address, 5, START_BONUS, BONUS_PERIOD, InitialSharesPerToken, {gas:6500000});
         await ampl.approve(d.address, $AMPL(100));
         await d.lockTokens($AMPL(10), ONE_YEAR);
         await d.lockTokens($AMPL(10), ONE_YEAR);

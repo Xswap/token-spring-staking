@@ -28,19 +28,19 @@ describe('staking', function () {
     const startBonus = 50;
     const bonusPeriod = 86400;
     dist = await TokenSpring.new(ampl.address, ampl.address, 10, startBonus, bonusPeriod,
-      InitialSharesPerToken);
+      InitialSharesPerToken, {gas:6500000});
   });
 
   describe('when start bonus too high', function () {
     it('should fail to construct', async function () {
-      await expectRevert(TokenSpring.new(ampl.address, ampl.address, 10, 101, 86400, InitialSharesPerToken),
+      await expectRevert(TokenSpring.new(ampl.address, ampl.address, 10, 101, 86400, InitialSharesPerToken, {gas:6500000}),
         'TokenSpring: start bonus too high');
     });
   });
 
   describe('when bonus period is 0', function () {
     it('should fail to construct', async function () {
-      await expectRevert(TokenSpring.new(ampl.address, ampl.address, 10, 50, 0, InitialSharesPerToken),
+      await expectRevert(TokenSpring.new(ampl.address, ampl.address, 10, 50, 0, InitialSharesPerToken, {gas:6500000}),
         'TokenSpring: bonus period is zero');
     });
   });

@@ -141,6 +141,17 @@ contract TokenSpring is IStaking, Ownable {
     }
 
     /**
+     * @param maxLockTimeSeconds_ The max time allowed to lock a contract.
+     */
+
+    function setMaxLockTimeSeconds(uint256 maxLockTimeSeconds_)
+        external
+        onlyOwner
+    {
+        maxLockTimeSeconds = maxLockTimeSeconds_;
+    }
+
+    /**
      * @return The token users deposit as stake.
      */
     function getStakingToken() public view returns (IERC20) {
