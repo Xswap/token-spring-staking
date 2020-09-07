@@ -1,13 +1,15 @@
-# Token Geyser
+# Token Spring
 
-[![Build Status](https://travis-ci.com/ampleforth/token-geyser.svg?token=o34Gqy9mFp6fX3Y6jzyy&branch=master)](https://travis-ci.com/ampleforth/token-geyser)&nbsp;&nbsp;[![Coverage Status](https://coveralls.io/repos/github/ampleforth/token-geyser/badge.svg?branch=master&t=LdZfUk)](https://coveralls.io/github/ampleforth/token-geyser?branch=master)
+A smart-contract based mechanism to distribute tokens over time, inspired loosely by Ampl's Geyser and HEX. The Spring resembles a traditional CD based system.
 
-A smart-contract based mechanism to distribute tokens over time, inspired loosely by Compound and Uniswap.
+Distribution tokens are added to a locked pool in the contract and become unlocked over time according to a once-configurable unlock schedule. Once unlocked, they are available to be claimed by users.
 
-Implementation of [Continuous Vesting Token Distribution](https://github.com/ampleforth/RFCs/blob/master/RFCs/rfc-1.md)
+A user may deposit tokens to accrue ownership share over the unlocked pool. This owner share is a function of the number of tokens deposited as well as the length of the lock time promised.
 
-The official Geyser contract addresses are (by target):
-- UniswapV2 [ETH/AMPL](https://uniswap.exchange/swap?outputCurrency=0xd46ba6d942050d489dbd938a2c909a5d5039a161) Pool: [0xD36132E0c1141B26E62733e018f12Eb38A7b7678](https://etherscan.io/address/0xd36132e0c1141b26e62733e018f12eb38a7b7678)
+If a user revokes their tokens from the pool too early, there is a penalty that gets applied to the received funds with 0 rewards paid out. The calculation for the penalty is: (% of time left / 2) * deposited staking tokens.
+
+The official Spring contract addresses are (by target):
+- UniswapV2 [ETH/COIL](https://uniswap.exchange/swap?outputCurrency=0x3936Ad01cf109a36489d93cabdA11cF062fd3d48) Pool: [0x68051c65c310aa210bd8e79ed7aa1b0ac7e6db52](https://etherscan.io/address/0x68051c65c310aa210bd8e79ed7aa1b0ac7e6db52)
 
 ## Table of Contents
 
@@ -55,4 +57,5 @@ npm run coverage
 
 ## License
 
+[GNU General Public License v3.0 (c) 2020 coilcrypto.com](./LICENSE)
 [GNU General Public License v3.0 (c) 2020 Fragments, Inc.](./LICENSE)
