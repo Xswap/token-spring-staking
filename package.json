@@ -41,7 +41,7 @@
     "@openzeppelin/gsn-provider": "^0.1.9",
     "@openzeppelin/test-environment": "^0.1.2",
     "@openzeppelin/test-helpers": "^0.5.4",
-    "ajv": "^5.0.0",
+    "ajv": "^6.12.3",
     "bn-chai": "^1.0.1",
     "chai": "^4.2.0",
     "coveralls": "^3.0.2",
